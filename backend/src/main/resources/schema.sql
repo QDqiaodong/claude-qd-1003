@@ -1,0 +1,114 @@
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET character_set_client = utf8mb4;
+SET character_set_connection = utf8mb4;
+SET character_set_results = utf8mb4;
+
+-- ---------------------------------------------------------------------
+-- 制糖厂 · 榨季压榨与结晶成品管理
+-- 库名 sugar_refinery；application.yml 里 ddl-auto: none，表结构全部由本文件在 MySQL 镜像构建期导入。
+-- 注意：mysql 容器是 UTC，种子数据里的时间一律写 UTC_TIMESTAMP() + INTERVAL 8 HOUR。
+-- 品质三指标（糖度 / 纯度 / 纤维分）在 Java 侧是一个 record 组件（@CompositeType），
+-- 落库时摊平成本表的 brix / purity / fiber 三列。
+
+CREATE DATABASE IF NOT EXISTS sugar_refinery
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_unicode_ci;
+
+USE sugar_refinery;
+
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS sugar_batch;
+DROP TABLE IF EXISTS evap_pan;
+DROP TABLE IF EXISTS press_station;
+DROP TABLE IF EXISTS cane_intake;
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ---------------- 甘蔗进厂验收 ----------------
+CREATE TABLE cane_intake (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticket_no     VARCHAR(32) NOT NULL UNIQUE COMMENT '磅单号',
+    supplier      VARCHAR(64) NOT NULL COMMENT '蔗农 / 合作社',
+    truck_no      VARCHAR(24) NOT NULL,
+    gross_kg      DECIMAL(12,2) NOT NULL COMMENT '毛重',
+    tare_kg       DECIMAL(12,2) NOT NULL COMMENT '皮重',
+    net_kg        DECIMAL(12,2) NOT NULL COMMENT '净重 = 毛重 - 皮重 - 扣杂',
+    deduction_kg  DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '扣杂',
+    -- ↓↓↓ @CompositeType record 组件摊平出来的三列
+    brix          DECIMAL(5,2)  NOT NULL COMMENT '糖度 Brix',
+    purity        DECIMAL(5,2)  NOT NULL COMMENT '纯度 %',
+    fiber         DECIMAL(5,2)  NOT NULL COMMENT '纤维分 %',
+    -- ↑↑↑
+    result        VARCHAR(16) NOT NULL COMMENT '合格/扣杂/拒收',
+    status        VARCHAR(16) NOT NULL COMMENT '待验/已验收/已拒收',
+    intake_at     DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 压榨机组 ----------------
+CREATE TABLE press_station (
+    id                  BIGINT AUTO_INCREMENT PRIMARY KEY,
+    station_code        VARCHAR(24) NOT NULL UNIQUE,
+    station_name        VARCHAR(64) NOT NULL,
+    design_capacity_tph DECIMAL(8,2) NOT NULL COMMENT '设计处理量 吨/小时',
+    current_load_tph    DECIMAL(8,2) NOT NULL DEFAULT 0 COMMENT '当前负荷',
+    status              VARCHAR(16) NOT NULL COMMENT '运行/停机/检修',
+    last_maintain_at    DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 蒸发 / 结晶罐 ----------------
+CREATE TABLE evap_pan (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    pan_code    VARCHAR(24) NOT NULL UNIQUE,
+    pan_name    VARCHAR(64) NOT NULL,
+    pan_type    VARCHAR(16) NOT NULL COMMENT '蒸发罐/结晶罐',
+    capacity_m3 DECIMAL(8,2) NOT NULL,
+    status      VARCHAR(16) NOT NULL COMMENT '运行/洗罐/停用',
+    last_wash_at DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 成品糖批次 ----------------
+CREATE TABLE sugar_batch (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no    VARCHAR(32) NOT NULL UNIQUE,
+    grade       VARCHAR(16) NOT NULL COMMENT '白砂糖/赤砂糖/绵白糖/冰糖',
+    quantity_kg DECIMAL(12,2) NOT NULL,
+    -- ↓↓↓ 同样是 @CompositeType record 组件
+    brix        DECIMAL(5,2) NOT NULL,
+    purity      DECIMAL(5,2) NOT NULL,
+    fiber       DECIMAL(5,2) NOT NULL DEFAULT 0,
+    -- ↑↑↑
+    warehouse   VARCHAR(24) NOT NULL COMMENT '1号糖仓/2号糖仓/3号糖仓',
+    status      VARCHAR(16) NOT NULL COMMENT '待检/已入库/已发运',
+    produced_at DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- =====================================================================
+-- 种子数据
+-- =====================================================================
+
+INSERT INTO cane_intake (ticket_no, supplier, truck_no, gross_kg, tare_kg, net_kg, deduction_kg, brix, purity, fiber, result, status, intake_at) VALUES
+('CI-2026001', '河东蔗农合作社', '桂A12345', 32000.00, 12000.00, 19600.00,   400.00, 13.80, 86.50, 12.40, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR),
+('CI-2026002', '河西甘蔗基地',   '桂B67890', 30500.00, 11800.00, 18000.00,   700.00, 12.90, 84.20, 13.10, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 HOUR),
+('CI-2026003', '南山散户李',     '桂C11111', 28800.00, 11500.00, 16500.00,   800.00, 10.20, 79.80, 16.50, '拒收', '已拒收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 HOUR),
+('CI-2026004', '北岭合作社',     '桂D22222', 33200.00, 12100.00, 20300.00,   800.00, 14.10, 88.10, 11.90, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR),
+('CI-2026005', '新塘农场',       '桂E33333', 31000.00, 11900.00, 18200.00,   900.00, 12.10, 82.40, 15.60, '扣杂', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR),
+('CI-2026006', '双桥蔗区',       '桂F44444', 29900.00, 11700.00, 17400.00,   800.00, 13.20, 85.60, 12.80, '合格', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 MINUTE);
+
+INSERT INTO press_station (station_code, station_name, design_capacity_tph, current_load_tph, status, last_maintain_at) VALUES
+('PS-01', '1号压榨机组', 220.00, 198.00, '运行', UTC_TIMESTAMP() - INTERVAL 10 DAY),
+('PS-02', '2号压榨机组', 200.00, 205.00, '运行', UTC_TIMESTAMP() - INTERVAL 25 DAY),
+('PS-03', '3号压榨机组', 180.00,   0.00, '停机', UTC_TIMESTAMP() - INTERVAL 70 DAY),
+('PS-04', '4号压榨机组', 160.00,   0.00, '检修', UTC_TIMESTAMP() - INTERVAL  3 DAY);
+
+INSERT INTO evap_pan (pan_code, pan_name, pan_type, capacity_m3, status, last_wash_at) VALUES
+('EP-01', '1号蒸发罐', '蒸发罐', 120.00, '运行', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY),
+('EP-02', '2号蒸发罐', '蒸发罐', 110.00, '运行', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 DAY),
+('EP-03', '3号蒸发罐', '蒸发罐', 100.00, '洗罐', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR),
+('CP-01', '1号结晶罐', '结晶罐',  80.00, '运行', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
+('CP-02', '2号结晶罐', '结晶罐',  75.00, '停用', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 DAY);
+
+INSERT INTO sugar_batch (batch_no, grade, quantity_kg, brix, purity, fiber, warehouse, status, produced_at) VALUES
+('SB-2026001', '白砂糖', 48000.00, 99.90, 99.70, 0.00, '1号糖仓', '已入库', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY),
+('SB-2026002', '白砂糖', 52000.00, 99.80, 99.60, 0.00, '1号糖仓', '已发运', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 DAY),
+('SB-2026003', '赤砂糖', 31000.00, 97.50, 96.20, 0.00, '2号糖仓', '已入库', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 DAY),
+('SB-2026004', '白砂糖', 45500.00, 99.85, 99.65, 0.00, '2号糖仓', '待检',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR),
+('SB-2026005', '绵白糖', 28000.00, 99.10, 98.40, 0.00, '3号糖仓', '已入库', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 12 HOUR);
