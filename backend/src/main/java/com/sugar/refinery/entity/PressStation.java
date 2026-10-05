@@ -45,6 +45,14 @@ public class PressStation {
     @Column(name = "current_load_tph", nullable = false, precision = 8, scale = 2)
     private BigDecimal currentLoadTph;
 
+    /**
+     * 投料批已占用（千克），由投料交接闭环在同一事务里维护。
+     * 交接占用按「设计处理量对应的千克数」累计：occupiedKg 永远不得超过
+     * designCapacityTph × 1000，剩余可交接能力 = 设计处理量×1000 - 已占用。
+     */
+    @Column(name = "occupied_kg", nullable = false, precision = 14, scale = 2)
+    private BigDecimal occupiedKg = BigDecimal.ZERO;
+
     /** 运行 / 停机 / 检修 */
     @Column(name = "status", nullable = false, length = 16)
     private String status;
@@ -70,5 +78,28 @@ public class PressStation {
             return false;
         }
         return currentLoadTph.compareTo(designCapacityTph) > 0;
+    }
+
+    /** 已占用（吨），派生字段 */
+    @Transient
+    public BigDecimal getOccupiedTon() {
+        return occupiedKg == null ? BigDecimal.ZERO
+                : occupiedKg.divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 剩余可交接能力（千克）= 设计处理量×1000 - 已占用，派生字段 */
+    @Transient
+    public BigDecimal getRemainingKg() {
+        if (designCapacityTph == null) {
+            return BigDecimal.ZERO;
+        }
+        return designCapacityTph.multiply(BigDecimal.valueOf(1000))
+                .subtract(occupiedKg == null ? BigDecimal.ZERO : occupiedKg);
+    }
+
+    /** 剩余可交接能力（吨），派生字段 */
+    @Transient
+    public BigDecimal getRemainingTon() {
+        return getRemainingKg().divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
     }
 }

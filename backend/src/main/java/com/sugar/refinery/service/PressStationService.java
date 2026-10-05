@@ -55,6 +55,7 @@ public class PressStationService {
         p.setStationName(input.getStationName() == null ? input.getStationCode() : input.getStationName());
         p.setDesignCapacityTph(input.getDesignCapacityTph());
         p.setCurrentLoadTph(input.getCurrentLoadTph() == null ? BigDecimal.ZERO : input.getCurrentLoadTph());
+        p.setOccupiedKg(BigDecimal.ZERO);
         if (p.getCurrentLoadTph().compareTo(p.getDesignCapacityTph()) > 0) {
             throw new BizException("初始负荷不得超过设计处理量");
         }

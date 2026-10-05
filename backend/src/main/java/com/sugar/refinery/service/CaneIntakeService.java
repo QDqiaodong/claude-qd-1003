@@ -82,6 +82,7 @@ public class CaneIntakeService {
         intake.setDeductionKg(deduction);
         // 净重 = 毛重 - 皮重 - 扣杂
         intake.setNetKg(input.getGrossKg().subtract(input.getTareKg()).subtract(deduction));
+        intake.setAllocatedKg(BigDecimal.ZERO);
         if (intake.getNetKg().signum() <= 0) {
             throw new BizException("扣杂后净重不为正，请核对过磅数据");
         }

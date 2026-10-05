@@ -64,6 +64,10 @@ public class CaneIntake {
     @Column(name = "deduction_kg", nullable = false, precision = 12, scale = 2)
     private BigDecimal deductionKg;
 
+    /** 已交接投料的净重（千克），由投料交接闭环在同一事务里维护 */
+    @Column(name = "allocated_kg", nullable = false, precision = 12, scale = 2)
+    private BigDecimal allocatedKg = BigDecimal.ZERO;
+
     // ------------------------------------------------------------------
     // 本仓后端路线：record 值对象 ↔ brix / purity / fiber 三列
     // ------------------------------------------------------------------
@@ -101,5 +105,14 @@ public class CaneIntake {
     public BigDecimal getNetTon() {
         return netKg == null ? BigDecimal.ZERO
                 : netKg.divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 可投余量（千克）= 净重 - 已交接，派生字段 */
+    @Transient
+    public BigDecimal getAvailableKg() {
+        if (netKg == null) {
+            return BigDecimal.ZERO;
+        }
+        return netKg.subtract(allocatedKg == null ? BigDecimal.ZERO : allocatedKg);
     }
 }

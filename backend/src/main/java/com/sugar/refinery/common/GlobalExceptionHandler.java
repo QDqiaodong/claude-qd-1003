@@ -2,6 +2,7 @@ package com.sugar.refinery.common;
 
 import java.util.stream.Collectors;
 
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,11 +44,21 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 唯一约束冲突：400（避免在页面上抛出非人话的外键报错）
+     * 唯一约束 / 取值范围约束冲突：400（避免在页面上抛出非人话的外键报错）
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleIntegrity(DataIntegrityViolationException e) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.fail("存在唯一性约束冲突，请检查编号、手机号是否重复"));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.fail("存在数据约束冲突（编号重复或数值越界），本次操作未生效，请刷新后重试"));
+    }
+
+    /**
+     * 行锁等待超时 / 死锁（投料交接等并发写）：409，事务已整体回滚，可安全重试
+     */
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConcurrency(ConcurrencyFailureException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.fail("系统繁忙（并发写冲突），本次未落下任何数据，可安全重试"));
     }
 
     /**

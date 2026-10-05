@@ -4,6 +4,7 @@ import router from './router'
 import api from './api'
 
 import IntakeView from './views/IntakeView.vue'
+import FeedView from './views/FeedView.vue'
 import PressView from './views/PressView.vue'
 import PanView from './views/PanView.vue'
 import BatchView from './views/BatchView.vue'
@@ -11,12 +12,13 @@ import BatchView from './views/BatchView.vue'
 // ------------------------------------------------------------------
 // 导航形态：底部 chips 横滑导航条。
 // 没有侧边栏也没有顶部菜单，整屏底部是一排可横向滑动的胶囊：
-// 「甘蔗进厂」「压榨机组」「蒸发结晶」「成品糖」各占一枚，选中那枚抬起并填充主色。
+// 「甘蔗进厂」「投料交接」「压榨机组」「蒸发结晶」「成品糖」各占一枚，选中那枚抬起并填充主色。
 // 页面主体一直贴着底部条上方铺开，切模块只动那一排胶囊。
 // ------------------------------------------------------------------
 
 const viewMap = {
   '/intake': IntakeView,
+  '/feed': FeedView,
   '/press': PressView,
   '/pan': PanView,
   '/batch': BatchView
@@ -24,13 +26,14 @@ const viewMap = {
 
 const chips = [
   { path: '/intake', label: '甘蔗进厂', key: 'intake' },
+  { path: '/feed', label: '投料交接', key: 'feed' },
   { path: '/press', label: '压榨机组', key: 'press' },
   { path: '/pan', label: '蒸发结晶', key: 'pan' },
   { path: '/batch', label: '成品糖', key: 'batch' }
 ]
 
 const currentPath = ref(router.currentRoute.value.path)
-const counts = ref({ intake: 0, press: 0, pan: 0, batch: 0 })
+const counts = ref({ intake: 0, feed: 0, press: 0, pan: 0, batch: 0 })
 
 const currentView = computed(() => viewMap[currentPath.value] || IntakeView)
 const currentLabel = computed(() => {
@@ -40,10 +43,10 @@ const currentLabel = computed(() => {
 
 async function loadCounts() {
   try {
-    const [a, b, c, d] = await Promise.all([
-      api.listIntakes(), api.listPresses(), api.listPans(), api.listBatches()
+    const [a, f, b, c, d] = await Promise.all([
+      api.listIntakes(), api.listFeedBatches(), api.listPresses(), api.listPans(), api.listBatches()
     ])
-    counts.value = { intake: a.length, press: b.length, pan: c.length, batch: d.length }
+    counts.value = { intake: a.length, feed: f.length, press: b.length, pan: c.length, batch: d.length }
   } catch (e) {
     // 计数失败不影响主流程
   }
