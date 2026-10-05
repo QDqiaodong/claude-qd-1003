@@ -29,6 +29,17 @@ public final class Dict {
             "停机", List.of("运行", "检修"),
             "检修", List.of("停机"));
 
+    // ---------------- 投料交接 ----------------
+    /** 投料批状态：待投料 / 投料中 / 已完成 / 已撤回 */
+    public static final List<String> FEED_STATUSES = List.of("待投料", "投料中", "已完成", "已撤回");
+
+    /** 待投料 → 投料中 → 已完成；待投料可撤回；投料中不可撤回、不可改换机组 */
+    private static final Map<String, List<String>> FEED_NEXT = Map.of(
+            "待投料", List.of("投料中", "已撤回"),
+            "投料中", List.of("已完成"),
+            "已完成", List.of(),
+            "已撤回", List.of());
+
     // ---------------- 蒸发 / 结晶罐 ----------------
     /** 罐型：蒸发罐 / 结晶罐 */
     public static final List<String> PAN_TYPES = List.of("蒸发罐", "结晶罐");
@@ -89,6 +100,14 @@ public final class Dict {
 
     public static boolean canTransferPress(String from, String to) {
         return PRESS_NEXT.getOrDefault(from, List.of()).contains(to);
+    }
+
+    public static boolean isValidFeedStatus(String s) {
+        return s != null && FEED_STATUSES.contains(s);
+    }
+
+    public static boolean canTransferFeed(String from, String to) {
+        return FEED_NEXT.getOrDefault(from, List.of()).contains(to);
     }
 
     public static boolean isValidPanType(String t) {

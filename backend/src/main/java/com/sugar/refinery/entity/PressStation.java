@@ -45,6 +45,14 @@ public class PressStation {
     @Column(name = "current_load_tph", nullable = false, precision = 8, scale = 2)
     private BigDecimal currentLoadTph;
 
+    /**
+     * 投料批占用（千克甘蔗）：投料批「待投料 / 投料中」按计划量占用，
+     * 「已完成」按实际量留存，「已撤回」全量归还。
+     * 累计占用不得超过设计处理量（比较时统一折算成千克，避免精度丢失）。
+     */
+    @Column(name = "occupied_kg", nullable = false, precision = 12, scale = 2)
+    private BigDecimal occupiedKg = BigDecimal.ZERO;
+
     /** 运行 / 停机 / 检修 */
     @Column(name = "status", nullable = false, length = 16)
     private String status;
@@ -70,5 +78,21 @@ public class PressStation {
             return false;
         }
         return currentLoadTph.compareTo(designCapacityTph) > 0;
+    }
+
+    /** 投料批已占用量（吨），派生字段 */
+    @Transient
+    public BigDecimal getOccupiedTon() {
+        return occupiedKg == null ? BigDecimal.ZERO
+                : occupiedKg.divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 剩余处理能力（吨/小时）= 设计处理量 - 投料批已占用，派生字段 */
+    @Transient
+    public BigDecimal getRemainingCapacityTph() {
+        if (designCapacityTph == null) {
+            return BigDecimal.ZERO;
+        }
+        return designCapacityTph.subtract(getOccupiedTon());
     }
 }

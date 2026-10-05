@@ -64,6 +64,14 @@ public class CaneIntake {
     @Column(name = "deduction_kg", nullable = false, precision = 12, scale = 2)
     private BigDecimal deductionKg;
 
+    /**
+     * 已分配投料量（千克）：投料批「待投料 / 投料中」按计划量占用，
+     * 「已完成」按实际量留存，「已撤回」全量归还。
+     * 只由投料交接事务与投料批、机组占用同事务增減。
+     */
+    @Column(name = "allocated_kg", nullable = false, precision = 12, scale = 2)
+    private BigDecimal allocatedKg = BigDecimal.ZERO;
+
     // ------------------------------------------------------------------
     // 本仓后端路线：record 值对象 ↔ brix / purity / fiber 三列
     // ------------------------------------------------------------------
@@ -101,5 +109,12 @@ public class CaneIntake {
     public BigDecimal getNetTon() {
         return netKg == null ? BigDecimal.ZERO
                 : netKg.divide(BigDecimal.valueOf(1000), 2, RoundingMode.HALF_UP);
+    }
+
+    /** 可投余量（千克）= 净重 - 已分配投料量，派生字段 */
+    @Transient
+    public BigDecimal getRemainingKg() {
+        BigDecimal allocated = allocatedKg == null ? BigDecimal.ZERO : allocatedKg;
+        return netKg == null ? BigDecimal.ZERO : netKg.subtract(allocated);
     }
 }

@@ -17,6 +17,7 @@ CREATE DATABASE IF NOT EXISTS sugar_refinery
 USE sugar_refinery;
 
 SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS feed_batch;
 DROP TABLE IF EXISTS sugar_batch;
 DROP TABLE IF EXISTS evap_pan;
 DROP TABLE IF EXISTS press_station;
@@ -33,6 +34,7 @@ CREATE TABLE cane_intake (
     tare_kg       DECIMAL(12,2) NOT NULL COMMENT '皮重',
     net_kg        DECIMAL(12,2) NOT NULL COMMENT '净重 = 毛重 - 皮重 - 扣杂',
     deduction_kg  DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '扣杂',
+    allocated_kg  DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '已分配投料量：待投料/投料中按计划量，已完成按实际量',
     -- ↓↓↓ @CompositeType record 组件摊平出来的三列
     brix          DECIMAL(5,2)  NOT NULL COMMENT '糖度 Brix',
     purity        DECIMAL(5,2)  NOT NULL COMMENT '纯度 %',
@@ -50,6 +52,7 @@ CREATE TABLE press_station (
     station_name        VARCHAR(64) NOT NULL,
     design_capacity_tph DECIMAL(8,2) NOT NULL COMMENT '设计处理量 吨/小时',
     current_load_tph    DECIMAL(8,2) NOT NULL DEFAULT 0 COMMENT '当前负荷',
+    occupied_kg         DECIMAL(12,2) NOT NULL DEFAULT 0 COMMENT '投料批占用（千克甘蔗）：累计不得超过设计处理量',
     status              VARCHAR(16) NOT NULL COMMENT '运行/停机/检修',
     last_maintain_at    DATETIME
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -63,6 +66,27 @@ CREATE TABLE evap_pan (
     capacity_m3 DECIMAL(8,2) NOT NULL,
     status      VARCHAR(16) NOT NULL COMMENT '运行/洗罐/停用',
     last_wash_at DATETIME
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------- 投料交接（投料批） ----------------
+-- 数量闭环：提交交接时同一事务内「落投料批 + 扣 cane_intake.allocated_kg 余量
+-- + 增 press_station.occupied_kg 占用」；撤回 / 完成也在同一事务内双向归还。
+-- request_id 是幂等键：重复点击、超时重试沿用同一单号，唯一键保证只落一笔。
+CREATE TABLE feed_batch (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    batch_no    VARCHAR(32) NOT NULL UNIQUE COMMENT '投料批号',
+    request_id  VARCHAR(64) NOT NULL UNIQUE COMMENT '交接单号（幂等键）：同一请求只落一笔',
+    intake_id   BIGINT NOT NULL COMMENT '来源验收磅单',
+    station_id  BIGINT NOT NULL COMMENT '目标压榨机组',
+    plan_kg     DECIMAL(12,2) NOT NULL COMMENT '计划投料量（千克）',
+    actual_kg   DECIMAL(12,2) DEFAULT NULL COMMENT '实际投料量（千克），完成时回填',
+    status      VARCHAR(16) NOT NULL COMMENT '待投料/投料中/已完成/已撤回',
+    created_by  VARCHAR(32) COMMENT '值班员',
+    created_at  DATETIME,
+    started_at  DATETIME,
+    finished_at DATETIME COMMENT '完成或撤回时间',
+    INDEX idx_feed_intake (intake_id),
+    INDEX idx_feed_station (station_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------- 成品糖批次 ----------------
@@ -85,19 +109,27 @@ CREATE TABLE sugar_batch (
 -- 种子数据
 -- =====================================================================
 
-INSERT INTO cane_intake (ticket_no, supplier, truck_no, gross_kg, tare_kg, net_kg, deduction_kg, brix, purity, fiber, result, status, intake_at) VALUES
-('CI-2026001', '河东蔗农合作社', '桂A12345', 32000.00, 12000.00, 19600.00,   400.00, 13.80, 86.50, 12.40, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR),
-('CI-2026002', '河西甘蔗基地',   '桂B67890', 30500.00, 11800.00, 18000.00,   700.00, 12.90, 84.20, 13.10, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 HOUR),
-('CI-2026003', '南山散户李',     '桂C11111', 28800.00, 11500.00, 16500.00,   800.00, 10.20, 79.80, 16.50, '拒收', '已拒收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 HOUR),
-('CI-2026004', '北岭合作社',     '桂D22222', 33200.00, 12100.00, 20300.00,   800.00, 14.10, 88.10, 11.90, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR),
-('CI-2026005', '新塘农场',       '桂E33333', 31000.00, 11900.00, 18200.00,   900.00, 12.10, 82.40, 15.60, '扣杂', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR),
-('CI-2026006', '双桥蔗区',       '桂F44444', 29900.00, 11700.00, 17400.00,   800.00, 13.20, 85.60, 12.80, '合格', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 MINUTE);
+INSERT INTO cane_intake (ticket_no, supplier, truck_no, gross_kg, tare_kg, net_kg, deduction_kg, allocated_kg, brix, purity, fiber, result, status, intake_at) VALUES
+('CI-2026001', '河东蔗农合作社', '桂A12345', 32000.00, 12000.00, 19600.00,   400.00,  8800.00, 13.80, 86.50, 12.40, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR),
+('CI-2026002', '河西甘蔗基地',   '桂B67890', 30500.00, 11800.00, 18000.00,   700.00,  6000.00, 12.90, 84.20, 13.10, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 HOUR),
+('CI-2026003', '南山散户李',     '桂C11111', 28800.00, 11500.00, 16500.00,   800.00,     0.00, 10.20, 79.80, 16.50, '拒收', '已拒收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 HOUR),
+('CI-2026004', '北岭合作社',     '桂D22222', 33200.00, 12100.00, 20300.00,   800.00,     0.00, 14.10, 88.10, 11.90, '合格', '已验收', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR),
+('CI-2026005', '新塘农场',       '桂E33333', 31000.00, 11900.00, 18200.00,   900.00,     0.00, 12.10, 82.40, 15.60, '扣杂', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR),
+('CI-2026006', '双桥蔗区',       '桂F44444', 29900.00, 11700.00, 17400.00,   800.00,     0.00, 13.20, 85.60, 12.80, '合格', '待验',   UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 MINUTE);
 
-INSERT INTO press_station (station_code, station_name, design_capacity_tph, current_load_tph, status, last_maintain_at) VALUES
-('PS-01', '1号压榨机组', 220.00, 198.00, '运行', UTC_TIMESTAMP() - INTERVAL 10 DAY),
-('PS-02', '2号压榨机组', 200.00, 205.00, '运行', UTC_TIMESTAMP() - INTERVAL 25 DAY),
-('PS-03', '3号压榨机组', 180.00,   0.00, '停机', UTC_TIMESTAMP() - INTERVAL 70 DAY),
-('PS-04', '4号压榨机组', 160.00,   0.00, '检修', UTC_TIMESTAMP() - INTERVAL  3 DAY);
+INSERT INTO press_station (station_code, station_name, design_capacity_tph, current_load_tph, occupied_kg, status, last_maintain_at) VALUES
+('PS-01', '1号压榨机组', 220.00, 198.00, 8800.00, '运行', UTC_TIMESTAMP() - INTERVAL 10 DAY),
+('PS-02', '2号压榨机组', 200.00, 205.00, 6000.00, '运行', UTC_TIMESTAMP() - INTERVAL 25 DAY),
+('PS-03', '3号压榨机组', 180.00,   0.00,    0.00, '停机', UTC_TIMESTAMP() - INTERVAL 70 DAY),
+('PS-04', '4号压榨机组', 160.00,   0.00,    0.00, '检修', UTC_TIMESTAMP() - INTERVAL  3 DAY);
+
+-- 投料批种子：与上面磅单 allocated_kg、机组 occupied_kg 对平
+-- CI-2026001：5000（待投料）+ 3800（已完成实际）= 8800；CI-2026002：6000（投料中）
+-- PS-01 占用 8800 kg；PS-02 占用 6000 kg
+INSERT INTO feed_batch (batch_no, request_id, intake_id, station_id, plan_kg, actual_kg, status, created_by, created_at, started_at, finished_at) VALUES
+('FB-20261005-01', 'SEED-FB-0001', 1, 1, 5000.00,   NULL, '待投料', '值班员·陈', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR, NULL, NULL),
+('FB-20261005-02', 'SEED-FB-0002', 2, 2, 6000.00,   NULL, '投料中', '值班员·李', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR, NULL),
+('FB-20261005-03', 'SEED-FB-0003', 1, 1, 4000.00, 3800.00, '已完成', '值班员·陈', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR);
 
 INSERT INTO evap_pan (pan_code, pan_name, pan_type, capacity_m3, status, last_wash_at) VALUES
 ('EP-01', '1号蒸发罐', '蒸发罐', 120.00, '运行', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 DAY),

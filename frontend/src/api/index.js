@@ -36,6 +36,13 @@ export default {
   setLoad: (id, loadTph) => call(http.post(`/press-stations/${id}/load`, null, params({ loadTph }))),
   transferPress: (id, target) => call(http.post(`/press-stations/${id}/transfer`, null, params({ target }))),
 
+  // ---------------- 投料交接 ----------------
+  listFeedBatches: (p) => call(http.get('/feed-batches', params(p))),
+  createFeedBatch: (d) => call(http.post('/feed-batches', d)),
+  startFeedBatch: (id) => call(http.post(`/feed-batches/${id}/start`)),
+  withdrawFeedBatch: (id) => call(http.post(`/feed-batches/${id}/withdraw`)),
+  completeFeedBatch: (id, actualKg) => call(http.post(`/feed-batches/${id}/complete`, null, params({ actualKg }))),
+
   // ---------------- 蒸发 / 结晶罐 ----------------
   listPans: (p) => call(http.get('/evap-pans', params(p))),
   createPan: (d) => call(http.post('/evap-pans', d)),
